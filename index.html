@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Multi-QR Scanner</title>
+<style>
+  :root {
+    --bg: #0d1013;
+    --panel: #171b1f;
+    --line: #2a2f35;
+    --text: #e8eaed;
+    --text-dim: #8a9098;
+    --read: #22c55e;
+    --unread: #ef4444;
+    --accent: #2f81f7;
+    --dummy: #4a5158;
+    --show-bg: #1f6f86;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  #camera, #overlay {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 100%;
+    max-height: 100%;
+  }
+  #camera { object-fit: contain; }
+  #overlay { pointer-events: none; }
+
+  #topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.75), transparent);
+    z-index: 10;
+    pointer-events: none;
+  }
+  #recordedCount { font-size: 18px; font-weight: 600; }
+  #recordedCount span { color: var(--accent); }
+  #statusMsg { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+  /* Right-side vertical button rail, positions echo the approved wireframe */
+  #controls {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 130px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #controls button {
+    position: absolute;
+    right: 16px;
+    width: 96px;
+    pointer-events: auto;
+  }
+  button {
+    font-family: inherit;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 16px;
+    padding: 16px 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #btnRead   { top: 18%; background: var(--accent); color: #fff; }
+  #btnShow   { top: 18%; margin-top: 62px; background: var(--panel); border: 1px solid var(--line); color: var(--text); }
+  #btnExport { top: 46%; background: var(--dummy); color: var(--text-dim); }
+  #btnClear  { bottom: 12%; background: var(--panel); border: 1px solid var(--unread); color: var(--unread); }
+
+  button:active { filter: brightness(0.85); }
+
+  /* Show panel: full-screen list, tap anywhere to close */
+  #showPanel {
+    position: absolute;
+    inset: 0;
+    background: var(--show-bg);
+    z-index: 20;
+    display: none;
+    flex-direction: column;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  #showPanel.visible { display: flex; }
+  #showPanel .hint {
+    color: rgba(255,255,255,0.65);
+    font-size: 12px;
+    margin: 0 0 14px;
+  }
+  #showList {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .show-row {
+    display: flex;
+    gap: 14px;
+    align-items: baseline;
+    color: #fff;
+    font-size: 16px;
+  }
+  .show-row .idx { min-width: 22px; opacity: 0.8; }
+  .show-row .data { word-break: break-all; }
+  #showEmpty { color: rgba(255,255,255,0.7); font-size: 14px; }
+
+  #permissionGate {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 32px; text-align: center;
+    gap: 16px; z-index: 30;
+    background: var(--bg);
+  }
+  #permissionGate h1 { font-size: 20px; margin: 0; }
+  #permissionGate p { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin: 0; max-width: 320px; }
+  #permissionGate button {
+    background: var(--accent); color: #fff; padding: 14px 28px; font-size: 16px; position: static;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="camera" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+
+  <div id="topbar">
+    <div id="recordedCount">Total read = <span id="recordedNum">0</span></div>
+    <div id="statusMsg"></div>
+  </div>
+
+  <div id="controls">
+    <button id="btnRead">Read</button>
+    <button id="btnShow">Show</button>
+    <button id="btnExport">Export</button>
+    <button id="btnClear">Clear</button>
+  </div>
+
+  <div id="showPanel">
+    <div id="recordedCountInPanel" class="hint">Total read = <span id="recordedNumInPanel">0</span> — แตะที่ไหนก็ได้เพื่อปิด</div>
+    <div id="showList"></div>
+    <div id="showEmpty" class="hidden">ยังไม่มีข้อมูลที่ Read</div>
+  </div>
+
+  <div id="permissionGate">
+    <h1>Multi-QR Scanner</h1>
+    <p id="gateText">แตะปุ่มด้านล่างเพื่อขอสิทธิ์ใช้กล้อง แล้วเล็งกล้องไปที่ QR code ของกล่องงาน</p>
+    <button id="btnStart">เปิดกล้อง</button>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
